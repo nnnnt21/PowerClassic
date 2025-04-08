@@ -1,31 +1,30 @@
 package entity
 
 import (
+	"PowerClassic/network"
 	"github.com/anthdm/hollywood/actor"
 )
 
 type ChunkProvider interface {
 }
 
+type EntityRunnable struct {
+	Run func(ctx *actor.Context, e Entity)
+}
+
 type Entity interface {
 	Id() byte
-	Unsafe_X() float32
-	Unsafe_Y() float32
-	Unsafe_Z() float32
-	GetPosition(ctx *actor.Context) (*GetPositionResponse, error)
-	GetPositionEng(eng *actor.Engine) (*GetPositionResponse, error)
-	Teleport(x, y, z float32)
+	GetName() string
+	X() float32
+	Y() float32
+	Z() float32
+	Teleport(ctx *actor.Context, x, y, z float32)
 	SetPid(pid *actor.PID)
 	GetPid() *actor.PID
 	actor.Receiver
 }
 
 type SessionedEntity interface {
+	SendPacket(pkt network.SerializablePacket)
 	Disconnect(reason string)
-}
-
-// TODO: move this, temp to avoid circular dependency
-type GetPosition struct{}
-type GetPositionResponse struct {
-	X, Y, Z, Pitch, Yaw float32
 }

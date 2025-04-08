@@ -2,9 +2,8 @@ package world
 
 import (
 	"PowerClassic/entity"
-	"PowerClassic/messages"
+	"PowerClassic/events"
 	"PowerClassic/packets"
-	"PowerClassic/player"
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
@@ -14,10 +13,17 @@ import (
 	"sort"
 )
 
-type CreateFlatWorld struct{}
-type CreateFlatWorldResponse struct {
-	Error error
+type WorldRunnable struct {
+	Run func(ctx *actor.Context, w *World)
 }
+type ChunkRunnable struct {
+	Run func(ctx *actor.Context, c *Chunk)
+}
+
+//type CreateFlatWorld struct{}
+//type CreateFlatWorldResponse struct {
+//	Error error
+//}
 
 type World struct {
 	pid    *actor.PID
@@ -63,29 +69,14 @@ func NewWorld(eng *actor.Engine, width, height, depth int) *World {
 
 func (w *World) Receive(ctx *actor.Context) {
 	switch msg := ctx.Message().(type) {
-	case *CreateFlatWorld:
-		err := w.createFlatWorld()
-		if err != nil {
-			log.Error().Err(err).Msg("failed to create flat world")
-		}
-		ctx.Respond(&CreateFlatWorldResponse{
-			Error: err,
-		})
-	case *messages.MovePlayer:
-		log.Info().Msg("move player on world")
-		tpk := &packets.PlayerTeleportPacket{
-			PlayerId: msg.ID,
-			X:        msg.X,
-			Y:        msg.Y,
-			Z:        msg.Z,
-			Yaw:      0,
-			Pitch:    0,
-		}
-		for _, child := range ctx.Children() {
-			ctx.Send(child, tpk)
-		}
-	case *messages.AddEntity:
-		w.addEntity(msg, ctx)
+	case *WorldRunnable:
+		msg.Run(ctx, w)
+	}
+}
+
+func (w *World) BroadcastEntityRunnable(ctx *actor.Context, runnable *entity.EntityRunnable) {
+	for _, e := range w.entities {
+		ctx.Send(e.GetPid(), runnable)
 	}
 }
 
@@ -97,69 +88,82 @@ func (w *World) SetPID(pid *actor.PID) {
 	w.pid = pid
 }
 
-func (w *World) addEntity(msg *messages.AddEntity, ctx *actor.Context) {
-
-	w.entities = append(w.entities, msg.E)
-
+func (w *World) spawnEntityActor(ctx *actor.Context, e entity.Entity) {
 	eid := ctx.SpawnChild(func() actor.Receiver {
-		return msg.E
+		return e
 	}, "entity")
+	e.SetPid(eid)
 
-	msg.E.SetPid(eid)
-	pos, err := msg.E.GetPosition(ctx)
+}
 
-	if err != nil {
-		panic(err)
-	}
-	err = w.moveEntity(ctx, msg.E, pos)
-	if err != nil {
-		log.Err(fmt.Errorf("error moving entity to chunk: %v", err))
-		return
-	}
+// TODO: i don't like passing event here, come back to this
+func (w *World) AddEntity(ctx *actor.Context, unsafe_E entity.Entity, evt *events.PlayerIdentificationEvent) {
+	w.entities = append(w.entities, unsafe_E)
 
-	_, ok := msg.E.(entity.SessionedEntity)
-	if ok {
-		pks, err := w.getLevelDataChunkPackets()
-		if err != nil {
-			log.Err(fmt.Errorf("error getting level data chunk packets: %v", err))
-			return
-		}
-		ctx.Send(eid, &messages.LevelData{Pks: pks})
-	}
-	msg.E.Teleport(*msg.Evt.SpawnX(), *msg.Evt.SpawnY(), *msg.Evt.SpawnZ())
+	w.spawnEntityActor(ctx, unsafe_E)
 
-	/*TODO: investigate if a server could support > 255 players seperated by multiple chunks of distance, despawning clients, and reissuing network ids*/
-	if p, ok := msg.E.(*player.Player); ok {
-		for _, e := range w.entities {
-			ctx.Send(e.GetPid(), &packets.SpawnPlayerPacket{
-				PlayerId:   msg.E.Id(),
-				PlayerName: p.GetName(),
-				X:          *msg.Evt.SpawnX(),
-				Y:          *msg.Evt.SpawnY(),
-				Z:          *msg.Evt.SpawnZ(),
-				Yaw:        0,
-				Pitch:      0,
-			})
-
-			ctx.Send(p.GetPid(), &packets.SpawnPlayerPacket{
-				PlayerId:   e.Id(),
-				PlayerName: p.GetName(),
-				X:          e.Unsafe_X(), //TODO:
-				Y:          e.Unsafe_Y(),
-				Z:          e.Unsafe_Z(),
-				Yaw:        0,
-				Pitch:      0,
+	ctx.Send(unsafe_E.GetPid(), &entity.EntityRunnable{Run: func(ctx *actor.Context, e entity.Entity) {
+		w.checkChunkChange(ctx, e)
+		se, isSe := e.(entity.SessionedEntity)
+		if isSe {
+			pks, err := w.getLevelDataChunkPackets()
+			if err != nil {
+				log.Err(fmt.Errorf("error getting level data chunk packets: %v", err))
+				return
+			}
+			se.SendPacket(&packets.LevelInitializePacket{})
+			for _, pk := range pks {
+				se.SendPacket(pk)
+			}
+			//TODO: should not be hardcoded but wtv, we fix later
+			se.SendPacket(&packets.LevelFinalizePacket{
+				X: 1024,
+				Y: 64,
+				Z: 1024,
 			})
 		}
-	}
+		e.Teleport(ctx, *evt.SpawnX(), *evt.SpawnY(), *evt.SpawnZ())
 
+		if isSe {
+			for _, unsafe_existingE := range w.entities {
+				if sessionedEntity, ok := unsafe_existingE.(entity.SessionedEntity); ok {
+					sessionedEntity.SendPacket(&packets.SpawnPlayerPacket{
+						PlayerId:   e.Id(),
+						PlayerName: e.GetName(),
+						X:          e.X(),
+						Y:          e.Y(),
+						Z:          e.Z(),
+						Yaw:        0,
+						Pitch:      0,
+					})
+				}
+				if isSe {
+					ctx.Send(unsafe_existingE.GetPid(), &entity.EntityRunnable{Run: func(ctx *actor.Context, existingE entity.Entity) {
+						var id = existingE.Id()
+						if unsafe_existingE.Id() == unsafe_E.Id() {
+							id = 255
+						}
+						se.SendPacket(&packets.SpawnPlayerPacket{
+							PlayerId:   id,
+							PlayerName: existingE.GetName(),
+							X:          existingE.X(),
+							Y:          existingE.Y(),
+							Z:          existingE.Z(),
+							Yaw:        0,
+							Pitch:      0,
+						})
+					}})
+				}
+			}
+		}
+	}})
 }
 
 func (w *World) GetNextEntityId() byte {
 	return w.idManager.NextEntityId()
 }
 
-func (w *World) createFlatWorld() error {
+func (w *World) CreateFlatWorld() error {
 	for _, chunk := range w.Chunks {
 		for x := 0; x < ChunkWidth; x++ {
 			for z := 0; z < ChunkDepth; z++ {
@@ -198,9 +202,9 @@ func (w *World) Unsafe_setBlock(x, y, z int, block byte) error {
 	return chunk.SetBlock(localX, y, localZ, block)
 }
 
-func (w *World) moveEntity(ctx *actor.Context, e entity.Entity, pos *entity.GetPositionResponse) error {
-	chunkX := int(pos.X) / ChunkWidth
-	chunkZ := int(pos.Z) / ChunkDepth
+func (w *World) checkChunkChange(ctx *actor.Context, e entity.Entity) error {
+	chunkX := int(e.X()) / ChunkWidth
+	chunkZ := int(e.Z()) / ChunkDepth
 	newChunkKey := [2]int{chunkX, chunkZ}
 
 	newChunk, ok := w.Chunks[newChunkKey]
@@ -212,11 +216,14 @@ func (w *World) moveEntity(ctx *actor.Context, e entity.Entity, pos *entity.GetP
 	if exists && currentChunk == newChunk {
 		return nil
 	}
-
-	ctx.Send(newChunk.pid, &messages.JoinChunk{E: e, Pos: pos})
+	ctx.Send(newChunk.pid, ChunkRunnable{Run: func(ctx *actor.Context, c *Chunk) {
+		c.JoinChunk(e, ctx)
+	}})
 
 	if exists {
-		ctx.Send(currentChunk.pid, &messages.LeaveChunk{E: e})
+		ctx.Send(currentChunk.pid, ChunkRunnable{Run: func(ctx *actor.Context, c *Chunk) {
+			c.LeaveChunk(e, ctx)
+		}})
 	}
 	return nil
 }

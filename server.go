@@ -35,14 +35,18 @@ func (s *Server) Receive(ctx *actor.Context) {
 		s.world.SetPID(worldPid)
 
 		log.Debug().Msgf("creating flat world")
-		resp := ctx.Request(worldPid, &world.CreateFlatWorld{}, time.Second*60)
+		resp := ctx.Request(worldPid, &world.WorldRunnable{func(ctx *actor.Context, w *world.World) {
+			err := w.CreateFlatWorld()
+			ctx.Respond(&messages.Response{E: err})
+		}}, time.Second*60)
+
 		res, err := resp.Result()
 		log.Debug().Msgf("flat world created")
 
-		worldResp, ok := res.(*world.CreateFlatWorldResponse)
+		worldResp, ok := res.(*messages.Response)
 
-		if err != nil || !ok || worldResp.Error != nil {
-			panic(fmt.Errorf("failed to create flat world %v %v", err, worldResp.Error))
+		if err != nil || !ok || worldResp.E != nil {
+			panic(fmt.Errorf("failed to create flat world %v %v", err, worldResp.E))
 		}
 
 		tcp_port, err := strconv.Atoi(os.Getenv("TCP_PORT"))
@@ -87,18 +91,10 @@ func (s *Server) PromoteSession(session *session.Session, evt *events.PlayerIden
 
 	p := player.NewPlayer(session, w.GetNextEntityId(), *evt.SpawnX(), *evt.SpawnY(), *evt.SpawnZ(), s.actorEngine)
 
-	s.actorEngine.Send(w.GetPID(), &messages.AddEntity{E: p, Evt: evt})
+	s.actorEngine.Send(w.GetPID(), &world.WorldRunnable{func(ctx *actor.Context, w *world.World) {
+		w.AddEntity(ctx, p, evt)
+	}})
 
-	//shard := s.world.GetShard(0, 0)
-
-	//shard.Exec(func() {
-	//	player.NewPlayer(session, s.world, shard)
-	//})
-
-	//err := shard.AddEntity(player)
-	//if err != nil {
-	//	return nil
-	//}
 	return nil
 }
 

@@ -1,10 +1,11 @@
 package player
 
 import (
+	"PowerClassic/entity"
 	"PowerClassic/events"
-	"PowerClassic/messages"
 	"PowerClassic/packets"
 	"PowerClassic/session"
+	"PowerClassic/world"
 	"github.com/anthdm/hollywood/actor"
 	"github.com/rs/zerolog/log"
 )
@@ -21,29 +22,29 @@ func NewDefaultPlayerHandler(player *Player) *DefaultPlayerHandler {
 
 func (h *DefaultPlayerHandler) HandleMovement(eng *actor.Engine, pkt *packets.PlayerTeleportPacket) {
 
-	pos, err := h.player.GetPositionEng(eng)
+	eng.Send(h.player.GetPid(), PlayerRunnable{func(ctx *actor.Context, p *Player) {
+		evt := events.NewPlayerMoveEvent(p.X(), p.Y(), p.Z(), &pkt.X, &pkt.Y, &pkt.Z)
 
-	if err != nil {
-		panic(err)
-	}
+		log.Debug().Msgf("player move received")
 
-	evt := events.NewPlayerMoveEvent(pos.X, pos.Y, pos.Z, &pkt.X, &pkt.Y, &pkt.Z)
+		h.player.GetEventBus().Fire("PlayerMove", evt)
+		if evt.IsCancelled() {
+			h.player.Teleport(ctx, evt.FromX(), evt.FromY(), evt.FromZ())
+			return
+		}
+		p.SetPosition(pkt.X, pkt.Y, pkt.Z)
+		ctx.Send(ctx.Parent(), &world.WorldRunnable{func(ctx *actor.Context, w *world.World) {
+			w.BroadcastEntityRunnable(ctx, &entity.EntityRunnable{func(ctx *actor.Context, e entity.Entity) {
+				if e == h.player {
+					return
+				}
+				if ep, ok := e.(*Player); ok {
+					ep.SendPosition(h.player)
+				}
+			}})
+		}})
+	}})
 
-	log.Debug().Msgf("player move received")
-
-	h.player.GetEventBus().Fire("PlayerMove", evt)
-	if evt.IsCancelled() {
-		h.player.Teleport(evt.FromX(), evt.FromY(), evt.FromZ())
-		return
-	}
-	eng.Send(h.player.pid, &messages.MovePlayer{
-		ID:    h.player.id,
-		X:     pkt.X,
-		Y:     pkt.Y,
-		Z:     pkt.Z,
-		Pitch: 0,
-		Yaw:   0,
-	})
 }
 
 var _ session.PacketHandler = (*DefaultPlayerHandler)(nil)

@@ -145,7 +145,7 @@ func (s *Session) Start() {
 			if err == io.EOF {
 				return
 			}
-			log.Error().Msgf("error reading incoming network: %v", err)
+			log.Error().Msgf("error reading incoming packet: %v", err)
 		}
 		packetData := incomingDataPool.Get().([]byte)
 		if cap(packetData) < incomingLen {
@@ -165,7 +165,7 @@ func (s *Session) processOutgoingPackets() {
 				return
 			}
 			if err := s.SendPacketNow(sp); err != nil {
-				log.Err(err).Msg("failed to send outgoing network")
+				log.Err(err).Msg("failed to send outgoing packet")
 			}
 		case <-s.done:
 			return
@@ -181,7 +181,7 @@ func (s *Session) processIncomingPackets() {
 		pid, err := network.PeekPacketID(buf)
 
 		if err != nil {
-			log.Err(err).Msg("failed to deserialize base network")
+			log.Err(err).Msg("failed to deserialize base packet")
 			bufferPool.Put(buf)
 			incomingDataPool.Put(raw)
 			continue
@@ -191,17 +191,17 @@ func (s *Session) processIncomingPackets() {
 		case packets.PLAYER_IDENTIFICATION:
 			var pidPacket packets.PlayerIdentificationPacket
 			if err := pidPacket.Deserialize(buf); err != nil {
-				panic(fmt.Errorf("failed to deserialize PLAYER_IDENTIFICATION network: %v", err))
+				panic(fmt.Errorf("failed to deserialize PLAYER_IDENTIFICATION packet: %v", err))
 			}
 			s.handler.HandlePlayerIdentificationPacket(&pidPacket)
 		case packets.PLAYER_MOVEMENT:
 			var tpPkt packets.PlayerTeleportPacket
 			if err := tpPkt.Deserialize(buf); err != nil {
-				panic(fmt.Errorf("failed to deserialize PLAYER_MOVEMENT network: %v", err))
+				panic(fmt.Errorf("failed to deserialize PLAYER_MOVEMENT packet: %v", err))
 			}
 			s.handler.HandleMovement(s.engineProvider.GetEngine(), &tpPkt)
 		default:
-			log.Info().Msgf("unknown network type: %v", pid)
+			log.Info().Msgf("unknown packet type: %v", pid)
 		}
 
 		bufferPool.Put(buf)

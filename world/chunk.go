@@ -2,7 +2,6 @@ package world
 
 import (
 	"PowerClassic/entity"
-	"PowerClassic/messages"
 	"fmt"
 	"github.com/anthdm/hollywood/actor"
 )
@@ -34,17 +33,17 @@ func NewChunk(chunkX, chunkZ, height int) *Chunk {
 
 func (c *Chunk) Receive(ctx *actor.Context) {
 	switch msg := ctx.Message().(type) {
-	case *messages.JoinChunk:
-		c.addEntity(msg, ctx)
-		ctx.Respond(messages.Response{})
-	case *messages.LeaveChunk:
-		delete(c.entities, msg.E)
-		ctx.Respond(messages.Response{})
+	case *ChunkRunnable:
+		msg.Run(ctx, c)
 	}
 }
 
-func (c *Chunk) addEntity(msg *messages.JoinChunk, ctx *actor.Context) {
-	c.entities[msg.E] = struct{}{}
+func (c *Chunk) JoinChunk(e entity.Entity, ctx *actor.Context) {
+	c.entities[e] = struct{}{}
+}
+
+func (c *Chunk) LeaveChunk(e entity.Entity, ctx *actor.Context) {
+	delete(c.entities, e)
 }
 
 func (c *Chunk) index(localX, y, localZ int) (int, error) {

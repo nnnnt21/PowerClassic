@@ -3,14 +3,17 @@ package player
 import (
 	"PowerClassic/entity"
 	"PowerClassic/event"
-	"PowerClassic/messages"
+	"PowerClassic/network"
 	"PowerClassic/packets"
 	"PowerClassic/session"
-	"errors"
+	"PowerClassic/world"
 	"github.com/anthdm/hollywood/actor"
 	"github.com/rs/zerolog/log"
-	"time"
 )
+
+type PlayerRunnable struct {
+	Run func(ctx *actor.Context, p *Player)
+}
 
 type Player struct {
 	pid *actor.PID
@@ -30,34 +33,6 @@ type Player struct {
 	initialSpawnX float32
 	initialSpawnY float32
 	initialSpawnZ float32
-}
-
-// TODO: need a better way to do this
-func (p *Player) GetPosition(ctx *actor.Context) (*entity.GetPositionResponse, error) {
-	resp := ctx.Request(p.pid, &entity.GetPosition{}, time.Second*10)
-
-	res, err := resp.Result()
-	if err != nil {
-		return nil, err
-	}
-	if res, ok := res.(*entity.GetPositionResponse); ok {
-		return res, nil
-	}
-	return nil, errors.New("invalid response type")
-}
-
-// TODO: need a better way to do this
-func (p *Player) GetPositionEng(eng *actor.Engine) (*entity.GetPositionResponse, error) {
-	resp := eng.Request(p.pid, &entity.GetPosition{}, time.Second*10)
-
-	res, err := resp.Result()
-	if err != nil {
-		return nil, err
-	}
-	if res, ok := res.(*entity.GetPositionResponse); ok {
-		return res, nil
-	}
-	return nil, errors.New("invalid response type")
 }
 
 func NewPlayer(s *session.Session, id byte, x, y, z float32, eng *actor.Engine) *Player {
@@ -81,40 +56,16 @@ func NewPlayer(s *session.Session, id byte, x, y, z float32, eng *actor.Engine) 
 	return p
 }
 
+func (p *Player) SendPacket(pkt network.SerializablePacket) {
+	p.s.AddOutgoingPacket(pkt)
+}
+
 func (p *Player) Receive(ctx *actor.Context) {
 	switch msg := ctx.Message().(type) {
-	case *messages.LevelData:
-		p.sendLevelData(msg.Pks)
-	case *messages.Teleport:
-		p.teleport(msg)
-	case *messages.Disconnect:
-		p.disconnect(msg)
-	case *messages.MovePlayer:
-		p.move(msg)
-		ctx.Forward(ctx.Parent())
-	case *entity.GetPosition:
-		log.Info().Msgf("Received GetPosition %+v", msg)
-		ctx.Respond(&entity.GetPositionResponse{
-			X:     p.x,
-			Y:     p.y,
-			Z:     p.z,
-			Pitch: 0,
-			Yaw:   0,
-		})
-	case *packets.PlayerTeleportPacket:
-		if msg.PlayerId == p.id {
-			log.Info().Msgf("Received self PlayerTeleportPacket %+v", msg)
-			return
-		}
-		p.s.AddOutgoingPacket(msg)
-	case *packets.SpawnPlayerPacket:
-		if msg.PlayerId == p.id {
-			cop := *msg
-			cop.PlayerId = 255
-			p.s.AddOutgoingPacket(&cop)
-			return
-		}
-		p.s.AddOutgoingPacket(msg)
+	case *PlayerRunnable:
+		msg.Run(ctx, p)
+	case *entity.EntityRunnable:
+		msg.Run(ctx, p)
 	default:
 		log.Debug().Msgf("Received message of type %T\n", msg)
 	}
@@ -149,41 +100,47 @@ func (p *Player) sendLevelData(pks []*packets.LevelDataChunkPacket) {
 	})
 }
 
-func (p *Player) move(msg *messages.MovePlayer) {
-	p.x = msg.X
-	p.y = msg.Y
-	p.z = msg.Z
+func (p *Player) SetPosition(x, y, z float32) {
+	p.x = x
+	p.y = y
+	p.z = z
 }
-func (p *Player) Teleport(x, y, z float32) {
-	p.eng.Send(p.pid, &messages.Teleport{
-		X:     x,
-		Y:     y,
-		Z:     z,
-		Pitch: 0,
-		Yaw:   0,
-	})
-}
-func (p *Player) teleport(msg *messages.Teleport) {
-	p.x = msg.X
-	p.y = msg.Y
-	p.z = msg.Z
-
+func (p *Player) SendPosition(e entity.Entity) {
 	p.s.AddOutgoingPacket(&packets.PlayerTeleportPacket{
 		PlayerId: 255,
-		X:        msg.X,
-		Y:        msg.Y,
-		Z:        msg.Z,
+		X:        e.X(),
+		Y:        e.Y(),
+		Z:        e.Z(),
 		Yaw:      0,
 		Pitch:    0,
 	})
 }
+func (p *Player) Teleport(ctx *actor.Context, x, y, z float32) {
+	p.x = x
+	p.y = y
+	p.z = z
+
+	p.s.AddOutgoingPacket(&packets.PlayerTeleportPacket{
+		PlayerId: 255,
+		X:        x,
+		Y:        y,
+		Z:        z,
+		Yaw:      0,
+		Pitch:    0,
+	})
+
+	ctx.Send(ctx.Parent(), &world.WorldRunnable{func(ctx *actor.Context, w *world.World) {
+		w.BroadcastEntityRunnable(ctx, &entity.EntityRunnable{func(ctx *actor.Context, e entity.Entity) {
+			if ep, ok := e.(*Player); ok {
+				ep.SendPosition(p)
+			}
+		}})
+	}})
+}
 
 func (p *Player) Disconnect(reason string) {
-	p.eng.Send(p.pid, &messages.Disconnect{Reason: reason})
-}
-func (p *Player) disconnect(msg *messages.Disconnect) {
 	p.s.AddOutgoingPacket(&packets.DisconnectPacket{
-		Reason: msg.Reason,
+		Reason: reason,
 	})
 }
 
@@ -191,15 +148,15 @@ func (p *Player) Id() byte {
 	return p.id
 }
 
-func (p *Player) Unsafe_X() float32 {
+func (p *Player) X() float32 {
 	return p.x
 }
 
-func (p *Player) Unsafe_Y() float32 {
+func (p *Player) Y() float32 {
 	return p.y
 }
 
-func (p *Player) Unsafe_Z() float32 {
+func (p *Player) Z() float32 {
 	return p.z
 }
 
