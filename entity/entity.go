@@ -5,6 +5,11 @@ import (
 	"github.com/anthdm/hollywood/actor"
 )
 
+type Pos struct {
+	X, Y, Z float32
+}
+type PositionSnapshot *Pos
+
 type ChunkProvider interface {
 }
 
@@ -15,9 +20,7 @@ type EntityRunnable struct {
 type Entity interface {
 	Id() byte
 	GetName() string
-	X() float32
-	Y() float32
-	Z() float32
+	GetPosition() PositionSnapshot
 	Teleport(ctx *actor.Context, x, y, z float32)
 	SetPid(pid *actor.PID)
 	GetPid() *actor.PID

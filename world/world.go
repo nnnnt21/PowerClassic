@@ -135,13 +135,13 @@ func (w *World) AddEntity(ctx *actor.Context, unsafe_E entity.Entity, evt *event
 					if other.Id() == e.Id() {
 						id = SelfID
 					}
-
+					epos := e.GetPosition()
 					sessionedOther.SendPacket(&packets.SpawnPlayerPacket{
 						PlayerId:   id,
 						PlayerName: e.GetName(),
-						X:          e.X(),
-						Y:          e.Y(),
-						Z:          e.Z(),
+						X:          epos.X,
+						Y:          epos.Y,
+						Z:          epos.Z,
 						Yaw:        0,
 						Pitch:      0,
 					})
@@ -151,12 +151,13 @@ func (w *World) AddEntity(ctx *actor.Context, unsafe_E entity.Entity, evt *event
 					otherCopy := other
 
 					ctx.Send(otherCopy.GetPid(), &entity.EntityRunnable{Run: func(ctx *actor.Context, existingE entity.Entity) {
+						pos := existingE.GetPosition()
 						se.SendPacket(&packets.SpawnPlayerPacket{
 							PlayerId:   existingE.Id(),
 							PlayerName: existingE.GetName(),
-							X:          existingE.X(),
-							Y:          existingE.Y(),
-							Z:          existingE.Z(),
+							X:          pos.X,
+							Y:          pos.Y,
+							Z:          pos.Z,
 							Yaw:        0,
 							Pitch:      0,
 						})
@@ -211,8 +212,9 @@ func (w *World) Unsafe_setBlock(x, y, z int, block byte) error {
 }
 
 func (w *World) checkChunkChange(ctx *actor.Context, e entity.Entity) error {
-	chunkX := int(e.X()) / ChunkWidth
-	chunkZ := int(e.Z()) / ChunkDepth
+	ePos := e.GetPosition()
+	chunkX := int(ePos.X) / ChunkWidth
+	chunkZ := int(ePos.Z) / ChunkDepth
 	newChunkKey := [2]int{chunkX, chunkZ}
 
 	newChunk, ok := w.Chunks[newChunkKey]

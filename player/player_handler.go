@@ -23,7 +23,8 @@ func NewDefaultPlayerHandler(player *Player) *DefaultPlayerHandler {
 func (h *DefaultPlayerHandler) HandleMovement(eng *actor.Engine, pkt *packets.PlayerTeleportPacket) {
 
 	eng.Send(h.player.GetPid(), &PlayerRunnable{func(ctx *actor.Context, p *Player) {
-		evt := events.NewPlayerMoveEvent(p.X(), p.Y(), p.Z(), &pkt.X, &pkt.Y, &pkt.Z)
+		pos := p.GetPosition()
+		evt := events.NewPlayerMoveEvent(pos.X, pos.Y, pos.Z, &pkt.X, &pkt.Y, &pkt.Z)
 
 		log.Debug().Msgf("player move received")
 

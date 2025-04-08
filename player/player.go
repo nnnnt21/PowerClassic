@@ -106,11 +106,12 @@ func (p *Player) SetPosition(x, y, z float32) {
 	p.z = z
 }
 func (p *Player) SendPosition(e entity.Entity) {
+	snapshotPos := e.GetPosition()
 	p.s.AddOutgoingPacket(&packets.PlayerTeleportPacket{
 		PlayerId: e.Id(),
-		X:        e.X(),
-		Y:        e.Y(),
-		Z:        e.Z(),
+		X:        snapshotPos.X,
+		Y:        snapshotPos.Y,
+		Z:        snapshotPos.Z,
 		Yaw:      0,
 		Pitch:    0,
 	})
@@ -148,16 +149,8 @@ func (p *Player) Id() byte {
 	return p.id
 }
 
-func (p *Player) X() float32 {
-	return p.x
-}
-
-func (p *Player) Y() float32 {
-	return p.y
-}
-
-func (p *Player) Z() float32 {
-	return p.z
+func (p *Player) GetPosition() entity.PositionSnapshot {
+	return &entity.Pos{p.x, p.y, p.z}
 }
 
 var _ entity.Entity = (*Player)(nil)
