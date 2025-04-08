@@ -1,0 +1,74 @@
+package world
+
+import (
+	"PowerClassic/entity"
+	"PowerClassic/messages"
+	"fmt"
+	"github.com/anthdm/hollywood/actor"
+)
+
+const (
+	ChunkWidth = 16
+	ChunkDepth = 16
+)
+
+// virtual chunk of the world, classic client doesn't seem to know about a chunk but we can still use this to seperate processing, or maybe there is an extension for chunks? We will see later
+type Chunk struct {
+	pid            *actor.PID
+	ChunkX, ChunkZ int
+	Height         int
+	Blocks         []byte
+	entities       map[entity.Entity]struct{}
+}
+
+func NewChunk(chunkX, chunkZ, height int) *Chunk {
+	total := ChunkWidth * height * ChunkDepth
+	return &Chunk{
+		ChunkX:   chunkX,
+		ChunkZ:   chunkZ,
+		Height:   height,
+		Blocks:   make([]byte, total),
+		entities: make(map[entity.Entity]struct{}),
+	}
+}
+
+func (c *Chunk) Receive(ctx *actor.Context) {
+	switch msg := ctx.Message().(type) {
+	case *messages.JoinChunk:
+		c.addEntity(msg, ctx)
+		ctx.Respond(messages.Response{})
+	case *messages.LeaveChunk:
+		delete(c.entities, msg.E)
+		ctx.Respond(messages.Response{})
+	}
+}
+
+func (c *Chunk) addEntity(msg *messages.JoinChunk, ctx *actor.Context) {
+	c.entities[msg.E] = struct{}{}
+}
+
+func (c *Chunk) index(localX, y, localZ int) (int, error) {
+	if localX < 0 || localX >= ChunkWidth || y < 0 || y >= c.Height || localZ < 0 || localZ >= ChunkDepth {
+		return 0, fmt.Errorf("coordinates out of range in chunk (%d, %d): (%d, %d, %d)", c.ChunkX, c.ChunkZ, localX, y, localZ)
+	}
+	return localX + localZ*ChunkWidth + y*ChunkWidth*ChunkDepth, nil
+}
+
+func (c *Chunk) GetBlock(localX, y, localZ int) (byte, error) {
+	idx, err := c.index(localX, y, localZ)
+	if err != nil {
+		return 0, err
+	}
+	return c.Blocks[idx], nil
+}
+
+func (c *Chunk) SetBlock(localX, y, localZ int, block byte) error {
+	idx, err := c.index(localX, y, localZ)
+	if err != nil {
+		return err
+	}
+	c.Blocks[idx] = block
+	return nil
+}
+
+var _ actor.Receiver = (*Chunk)(nil)

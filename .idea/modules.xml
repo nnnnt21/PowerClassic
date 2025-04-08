@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/PowerClassic.iml" filepath="$PROJECT_DIR$/.idea/PowerClassic.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../PowerMC/.idea/PowerMC.iml" filepath="$PROJECT_DIR$/../PowerMC/.idea/PowerMC.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../PowerNET/.idea/PowerNET.iml" filepath="$PROJECT_DIR$/../PowerNET/.idea/PowerNET.iml" />
+    </modules>
+  </component>
+</project>
