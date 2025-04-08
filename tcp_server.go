@@ -42,7 +42,7 @@ func (s *TCPServer) Start() {
 			pid, ok := evt.(*events.PlayerIdentificationEvent)
 			if ok {
 				var spawnX = float32(10)
-				var spawnY = float32(10)
+				var spawnY = float32(5)
 				var spawnZ = float32(10)
 				pid.SetSpawnX(&spawnX)
 				pid.SetSpawnY(&spawnY)

@@ -98,12 +98,14 @@ func (w *World) spawnEntityActor(ctx *actor.Context, e entity.Entity) {
 
 // TODO: i don't like passing event here, come back to this
 func (w *World) AddEntity(ctx *actor.Context, unsafe_E entity.Entity, evt *events.PlayerIdentificationEvent) {
-	w.entities = append(w.entities, unsafe_E)
+	const SelfID = 255
 
+	w.entities = append(w.entities, unsafe_E)
 	w.spawnEntityActor(ctx, unsafe_E)
 
 	ctx.Send(unsafe_E.GetPid(), &entity.EntityRunnable{Run: func(ctx *actor.Context, e entity.Entity) {
 		w.checkChunkChange(ctx, e)
+
 		se, isSe := e.(entity.SessionedEntity)
 		if isSe {
 			pks, err := w.getLevelDataChunkPackets()
@@ -111,24 +113,31 @@ func (w *World) AddEntity(ctx *actor.Context, unsafe_E entity.Entity, evt *event
 				log.Err(fmt.Errorf("error getting level data chunk packets: %v", err))
 				return
 			}
+
 			se.SendPacket(&packets.LevelInitializePacket{})
 			for _, pk := range pks {
 				se.SendPacket(pk)
 			}
-			//TODO: should not be hardcoded but wtv, we fix later
+
 			se.SendPacket(&packets.LevelFinalizePacket{
 				X: 1024,
 				Y: 64,
 				Z: 1024,
 			})
 		}
+
 		e.Teleport(ctx, *evt.SpawnX(), *evt.SpawnY(), *evt.SpawnZ())
 
 		if isSe {
-			for _, unsafe_existingE := range w.entities {
-				if sessionedEntity, ok := unsafe_existingE.(entity.SessionedEntity); ok {
-					sessionedEntity.SendPacket(&packets.SpawnPlayerPacket{
-						PlayerId:   e.Id(),
+			for _, other := range w.entities {
+				if sessionedOther, ok := other.(entity.SessionedEntity); ok {
+					id := e.Id()
+					if other.Id() == e.Id() {
+						id = SelfID
+					}
+
+					sessionedOther.SendPacket(&packets.SpawnPlayerPacket{
+						PlayerId:   id,
 						PlayerName: e.GetName(),
 						X:          e.X(),
 						Y:          e.Y(),
@@ -137,14 +146,13 @@ func (w *World) AddEntity(ctx *actor.Context, unsafe_E entity.Entity, evt *event
 						Pitch:      0,
 					})
 				}
-				if isSe {
-					ctx.Send(unsafe_existingE.GetPid(), &entity.EntityRunnable{Run: func(ctx *actor.Context, existingE entity.Entity) {
-						var id = existingE.Id()
-						if unsafe_existingE.Id() == unsafe_E.Id() {
-							id = 255
-						}
+
+				if other.Id() != e.Id() {
+					otherCopy := other
+
+					ctx.Send(otherCopy.GetPid(), &entity.EntityRunnable{Run: func(ctx *actor.Context, existingE entity.Entity) {
 						se.SendPacket(&packets.SpawnPlayerPacket{
-							PlayerId:   id,
+							PlayerId:   existingE.Id(),
 							PlayerName: existingE.GetName(),
 							X:          existingE.X(),
 							Y:          existingE.Y(),

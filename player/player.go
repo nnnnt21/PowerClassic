@@ -107,7 +107,7 @@ func (p *Player) SetPosition(x, y, z float32) {
 }
 func (p *Player) SendPosition(e entity.Entity) {
 	p.s.AddOutgoingPacket(&packets.PlayerTeleportPacket{
-		PlayerId: 255,
+		PlayerId: e.Id(),
 		X:        e.X(),
 		Y:        e.Y(),
 		Z:        e.Z(),
